@@ -1,0 +1,10 @@
+<component name="libraryTable">
+  <library name="Gradle: org.whispersystems:signal-protocol-android:2.4.0@aar">
+    <CLASSES>
+      <root url="jar://$USER_HOME$/.gradle/caches/transforms-1/files-1.1/signal-protocol-android-2.4.0.aar/1b0f3177f3ea60eaa76b61337927ab4d/jars/classes.jar!/" />
+      <root url="file://$USER_HOME$/.gradle/caches/transforms-1/files-1.1/signal-protocol-android-2.4.0.aar/1b0f3177f3ea60eaa76b61337927ab4d/res" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
