@@ -4,13 +4,21 @@ import android.app.Activity;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
-import android.support.v7.app.AppCompatActivity;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
 import android.os.Bundle;
 import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.example.broadcast.broadcast.BroadcastManager;
+import com.example.broadcast.broadcast.MessageBroadcastTask;
+import com.example.broadcast.broadcast.UiThreadCallback;
+import com.example.broadcast.broadcast.Util;
+
+import java.lang.ref.WeakReference;
 import java.util.HashSet;
 
 import io.left.rightmesh.android.AndroidMeshManager;
@@ -25,7 +33,7 @@ import static io.left.rightmesh.mesh.MeshManager.DATA_RECEIVED;
 import static io.left.rightmesh.mesh.MeshManager.PEER_CHANGED;
 import static io.left.rightmesh.mesh.MeshManager.REMOVED;
 
-public class MainActivity extends Activity implements MeshStateListener {
+public class MainActivity extends Activity implements MeshStateListener, UiThreadCallback {
     // TODO: this port must match the port assigned, on developer.rightmesh.io, to your key
     private static final int HELLO_PORT = 61087;
 
@@ -34,6 +42,17 @@ public class MainActivity extends Activity implements MeshStateListener {
 
     // Set to keep track of peers connected to the mesh.
     HashSet<MeshId> users = new HashSet<>();
+
+
+    // The handler for the UI thread. Used for handling messages from worker threads.
+    private UiHandler mUiHandler;
+
+    // A text view to show messages sent from work threads
+    private TextView mDisplayTextView;
+
+    // A thread pool manager
+    // It is a static singleton instance by design and will survive activity lifecycle
+    private BroadcastManager broadcastManager;
 
     /**
      * Called when app first opens, initializes {@link AndroidMeshManager} reference (which will
@@ -46,14 +65,32 @@ public class MainActivity extends Activity implements MeshStateListener {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        mDisplayTextView =  mDisplayTextView = (TextView)findViewById(R.id.display);
+
         // TODO: when testing, we suggest using rightmesh-library-dev in app:build.gradle,
         // and specifying a pattern as the third argument to this call. This will isolate
         // your devices so they won't try to connect to the network of the developer sitting
         // beside you :D
         mm = AndroidMeshManager.getInstance(
                 MainActivity.this,
-                MainActivity.this);
+                MainActivity.this, "", "broad_aj");
     }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+
+        // Initialize the handler for UI thread to handle message from worker threads
+        mUiHandler = new UiHandler(Looper.getMainLooper(), mDisplayTextView);
+
+
+
+        // get the thread pool manager instance
+        broadcastManager = BroadcastManager.getInstance();
+        // CustomThreadPoolManager stores activity as a weak reference. No need to unregister.
+        broadcastManager.setUiThreadCallback(this);
+    }
+
 
     /**
      * Called when activity is on screen.
@@ -180,10 +217,20 @@ public class MainActivity extends Activity implements MeshStateListener {
      */
     public void sendHello(View v) throws RightMeshException {
         for (MeshId receiver : users) {
+
             String msg = "Hello to: " + receiver + " from" + mm.getUuid();
             Logger.log(this.getClass().getCanonicalName(), "MSG: " + msg);
-            byte[] testData = msg.getBytes();
-            mm.sendDataReliable(receiver, HELLO_PORT, testData);
+            /*byte[] testData = msg.getBytes();
+            mm.sendDataReliable(receiver, HELLO_PORT, testData);*/
+
+
+            MessageBroadcastTask messageBroadcastTask = new MessageBroadcastTask();
+            messageBroadcastTask.setMeshId(receiver);
+            messageBroadcastTask.setMeshMessage(msg);
+            messageBroadcastTask.setMeshManager(mm);
+            messageBroadcastTask.setCustomThreadPoolManager(broadcastManager);
+
+            broadcastManager.addCallable(messageBroadcastTask);
         }
     }
 
@@ -197,6 +244,45 @@ public class MainActivity extends Activity implements MeshStateListener {
             mm.showSettingsActivity();
         } catch (RightMeshException ex) {
             Logger.log(this.getClass().getCanonicalName(), "Service not connected");
+        }
+    }
+
+    @Override
+    public void publishToUiThread(Message message) {
+        // add the message from worker thread to UI thread's message queue
+        if(mUiHandler != null){
+            mUiHandler.sendMessage(message);
+        }
+    }
+
+
+    // UI handler class, declared as static so it doesn't have implicit
+    // reference to activity context. This helps to avoid memory leak.
+    private static class UiHandler extends Handler {
+        private WeakReference<TextView> mWeakRefDisplay;
+
+        public UiHandler(Looper looper, TextView display) {
+            super(looper);
+            this.mWeakRefDisplay = new WeakReference<TextView>(display);
+        }
+
+        // This method will run on UI thread
+        @Override
+        public void handleMessage(Message msg) {
+            super.handleMessage(msg);
+            switch (msg.what){
+                // Our communication protocol for passing a string to the UI thread
+                case Util.MESSAGE_ID:
+                    Bundle bundle = msg.getData();
+                    String messsageText = bundle.getString(Util.MESSAGE_BODY, Util.EMPTY_MESSAGE);
+
+
+                    if(mWeakRefDisplay != null && mWeakRefDisplay.get() != null)
+                        mWeakRefDisplay.get().append(Util.getReadableTime() + " " + messsageText + "\n");
+                    break;
+                default:
+                    break;
+            }
         }
     }
 }
